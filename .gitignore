@@ -1,0 +1,60 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+.venv*/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.pytest_cache/
+__pycache__/
+
+# AgentScope
+.agentscope/
+.claude/*.json
+
+# Data
+data/rag_knowledge/
+data/models/
+*.db
+*.db-shm
+*.db-wal
+data/memory/
+tests/results/
+data/preferences/*.json
+!data/preferences/.gitkeep
+
+# Logs
+*.log
+
+# Local secrets
+.env
+
+# OS
+.DS_Store
+Thumbs.db

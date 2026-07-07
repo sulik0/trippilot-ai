@@ -1,0 +1,61 @@
+import asyncio
+import json
+
+from agents.lazy_agent_registry import LazyAgentRegistry
+from agentscope.message import Msg
+from context.memory_manager import MemoryManager
+
+
+class FakeModel:
+    async def __call__(self, messages):
+        prompt = messages[-1]["content"]
+        if "事项收集专家" in prompt:
+            return type("Resp", (), {"content": json.dumps({
+                "origin": "北京",
+                "destination": "上海",
+                "start_date": "2026-07-08",
+                "end_date": "2026-07-10",
+                "duration_days": 3,
+                "return_location": "北京",
+                "trip_purpose": "出差",
+                "missing_info": [],
+                "extracted_count": 7,
+                "summary": "北京到上海出差3天",
+            }, ensure_ascii=False)})()
+        return type("Resp", (), {"content": "{}"})()
+
+
+def test_memory_roundtrip(tmp_path):
+    memory = MemoryManager("smoke_user", "smoke_session", storage_path=str(tmp_path))
+    memory.long_term.save_preference("hotel_brands", ["汉庭"])
+    memory.long_term.save_trip_history({
+        "origin": "北京",
+        "destination": "上海",
+        "start_date": "2026-07-08",
+        "purpose": "出差",
+    })
+
+    reloaded = MemoryManager("smoke_user", "next_session", storage_path=str(tmp_path))
+
+    assert reloaded.long_term.get_preference("hotel_brands") == ["汉庭"]
+    assert reloaded.long_term.get_trip_history(1)[0]["destination"] == "上海"
+
+
+def test_lazy_registry_loads_event_collection():
+    registry = LazyAgentRegistry(model=FakeModel(), cache={})
+    agent = registry["event_collection"]
+
+    assert "event_collection" in registry.get_loaded_agents()
+
+    async def run():
+        msg = Msg(
+            name="test",
+            content=json.dumps({"context": {"rewritten_query": "北京到上海出差3天"}}, ensure_ascii=False),
+            role="user",
+        )
+        result = await agent.reply(msg)
+        return json.loads(result.content)
+
+    data = asyncio.run(run())
+    assert data["origin"] == "北京"
+    assert data["destination"] == "上海"
