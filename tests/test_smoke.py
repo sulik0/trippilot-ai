@@ -107,6 +107,14 @@ def test_orchestrator_uses_protocol_envelope():
     assert data["run_id"] == "run_test_001"
     assert data["results"][0]["status"] == "success"
     assert data["results"][0]["task_id"].startswith("task_memory_query_")
+    assert data["trace"]["run_id"] == "run_test_001"
+    assert data["trace"]["duration_ms"] >= 0
+    assert len(data["trace"]["batches"]) == 1
+    assert data["trace"]["batches"][0]["parallel"] is False
+    assert len(data["trace"]["agents"]) == 1
+    assert data["trace"]["agents"][0]["agent_name"] == "memory_query"
+    assert data["trace"]["agents"][0]["status"] == "success"
+    assert data["trace"]["agents"][0]["duration_ms"] >= 0
     assert captured["payload"]["protocol_version"] == PROTOCOL_VERSION
     assert captured["payload"]["run_id"] == "run_test_001"
     assert captured["payload"]["reason"] == "验证协议"
@@ -132,3 +140,47 @@ def test_orchestrator_rejects_invalid_schedule():
     assert data["status"] == "error"
     assert data["protocol_version"] == PROTOCOL_VERSION
     assert data["error"]["code"] == "INVALID_AGENT_SCHEDULE"
+
+
+def test_orchestrator_traces_parallel_batch():
+    class OkAgent:
+        def __init__(self, name):
+            self.name = name
+
+        async def reply(self, msg):
+            return Msg(
+                name=self.name,
+                content=json.dumps({"agent": self.name}, ensure_ascii=False),
+                role="assistant",
+            )
+
+    orchestrator = OrchestrationAgent(
+        agent_registry={
+            "memory_query": OkAgent("memory_query"),
+            "preference": OkAgent("preference"),
+        },
+        memory_manager=None,
+    )
+
+    async def run():
+        msg = Msg(
+            name="IntentionAgent",
+            content=json.dumps({
+                "run_id": "run_parallel_001",
+                "agent_schedule": [
+                    {"agent_name": "memory_query", "priority": 1},
+                    {"agent_name": "preference", "priority": 1},
+                ],
+            }),
+            role="assistant",
+        )
+        result = await orchestrator.reply(msg)
+        return json.loads(result.content)
+
+    data = asyncio.run(run())
+    agent_names = {event["agent_name"] for event in data["trace"]["agents"]}
+
+    assert data["status"] == "completed"
+    assert data["trace"]["batches"][0]["parallel"] is True
+    assert set(data["trace"]["batches"][0]["agent_names"]) == {"memory_query", "preference"}
+    assert agent_names == {"memory_query", "preference"}

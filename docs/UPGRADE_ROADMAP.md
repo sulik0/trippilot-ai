@@ -35,7 +35,7 @@
 - 捕获每个 Agent 的开始时间、结束时间、耗时、状态。
 - CLI 输出可以展示本次调用了哪些 Agent 和耗时。
 
-计划产物：
+产物：
 
 - `utils/run_trace.py`
 - OrchestrationAgent 中写入 trace events
@@ -45,6 +45,8 @@
 
 - 能讲可观测性，不只是“跑通”。
 - 能解释怎么定位某个 Agent 慢或失败。
+
+状态：已实施。
 
 ### Step 03：Skill Manifest 与能力注册
 
@@ -126,4 +128,4 @@
 ## 当前状态
 
 - GitHub 仓库：`https://github.com/sulik0/trippilot-ai`
-- 当前升级阶段：Step 01 Agent 通信协议标准化
+- 当前升级阶段：Step 02 运行轨迹与轻量可观测性

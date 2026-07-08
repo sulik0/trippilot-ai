@@ -29,6 +29,7 @@ from agents.protocol import (
     new_run_id,
     normalize_agent_output,
 )
+from utils.run_trace import RunTrace
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,7 @@ class OrchestrationAgent(AgentBase):
             )
 
         run_id = intention_data.get("run_id") or new_run_id()
+        trace = RunTrace(run_id)
 
         # 获取并验证智能体调度计划
         raw_schedule = intention_data.get("agent_schedule", [])
@@ -158,7 +160,7 @@ class OrchestrationAgent(AgentBase):
             if current_priority is not None and priority != current_priority:
                 # 并行执行当前优先级的所有任务
                 if parallel_tasks:
-                    batch_results = await self._execute_parallel_agents(parallel_tasks, context, results, run_id)
+                    batch_results = await self._execute_parallel_agents(parallel_tasks, context, results, run_id, trace)
                     results.extend(batch_results)
                     parallel_tasks = []
 
@@ -167,11 +169,13 @@ class OrchestrationAgent(AgentBase):
 
         # 执行最后一批
         if parallel_tasks:
-            batch_results = await self._execute_parallel_agents(parallel_tasks, context, results, run_id)
+            batch_results = await self._execute_parallel_agents(parallel_tasks, context, results, run_id, trace)
             results.extend(batch_results)
 
+        trace.finish()
+
         # 聚合结果
-        final_result = self._aggregate_results(results, intention_data, run_id)
+        final_result = self._aggregate_results(results, intention_data, run_id, trace)
 
         # 更新记忆
         if self.memory_manager:
@@ -219,7 +223,8 @@ class OrchestrationAgent(AgentBase):
         tasks: List[AgentTask],
         context: Dict[str, Any],
         previous_results: List[Dict],
-        run_id: str
+        run_id: str,
+        trace: RunTrace
     ) -> List[Dict]:
         """
         并行执行多个智能体
@@ -235,6 +240,14 @@ class OrchestrationAgent(AgentBase):
         if not tasks:
             return []
 
+        batch_id = f"batch_p{tasks[0].priority}_{len(trace.batch_events) + 1}"
+        trace.start_batch(
+            batch_id=batch_id,
+            priority=tasks[0].priority,
+            agent_names=[task.agent_name for task in tasks],
+            parallel=len(tasks) > 1,
+        )
+
         # 如果只有一个任务，直接执行
         if len(tasks) == 1:
             task = tasks[0]
@@ -242,8 +255,10 @@ class OrchestrationAgent(AgentBase):
                 task=task,
                 context=context,
                 previous_results=previous_results,
-                run_id=run_id
+                run_id=run_id,
+                trace=trace,
             )
+            trace.finish_batch(batch_id)
             return [{
                 "agent_name": task.agent_name,
                 "priority": task.priority,
@@ -267,7 +282,8 @@ class OrchestrationAgent(AgentBase):
                 task=task,
                 context=context,
                 previous_results=previous_results,
-                run_id=run_id
+                run_id=run_id,
+                trace=trace,
             )
             parallel_coroutines.append((task, coroutine))
 
@@ -307,6 +323,7 @@ class OrchestrationAgent(AgentBase):
                 "result": result
             })
 
+        trace.finish_batch(batch_id)
         return results
 
     async def _execute_agent(
@@ -314,7 +331,8 @@ class OrchestrationAgent(AgentBase):
         task: AgentTask,
         context: Dict[str, Any],
         previous_results: List[Dict],
-        run_id: str
+        run_id: str,
+        trace: RunTrace
     ) -> Dict[str, Any]:
         """
         执行单个智能体
@@ -329,6 +347,7 @@ class OrchestrationAgent(AgentBase):
             执行结果
         """
         agent_name = task.agent_name
+        trace.start_agent(task.task_id, agent_name, task.priority)
 
         # 检查智能体是否注册
         if agent_name not in self.agent_registry:
@@ -339,6 +358,7 @@ class OrchestrationAgent(AgentBase):
                 retryable=False,
                 user_message=f"智能体未注册: {agent_name}",
             )
+            trace.finish_agent(task.task_id, "error", error.code)
             return {
                 "status": "error",
                 "agent_name": agent_name,
@@ -376,7 +396,13 @@ class OrchestrationAgent(AgentBase):
             else:
                 result = response.content
 
-            return normalize_agent_output(agent_name, result)
+            normalized = normalize_agent_output(agent_name, result)
+            trace.finish_agent(
+                task_id=task.task_id,
+                status=normalized.get("status", "unknown"),
+                error_code=(normalized.get("error") or {}).get("code"),
+            )
+            return normalized
 
         except Exception as e:
             logger.error(f"Agent execution failed: {agent_name}, error: {e}")
@@ -386,6 +412,7 @@ class OrchestrationAgent(AgentBase):
                 retryable=False,
                 user_message="智能体执行失败，请稍后重试。",
             )
+            trace.finish_agent(task.task_id, "error", error.code)
             # 返回友好的错误信息，但不中断流程
             return {
                 "status": "error",
@@ -399,7 +426,8 @@ class OrchestrationAgent(AgentBase):
         self,
         results: List[Dict],
         intention_data: Dict[str, Any],
-        run_id: str
+        run_id: str,
+        trace: RunTrace
     ) -> Dict[str, Any]:
         """
         聚合多个智能体的结果
@@ -420,7 +448,8 @@ class OrchestrationAgent(AgentBase):
                 "key_entities": intention_data.get("key_entities", {})
             },
             "agents_executed": len(results),
-            "results": []
+            "results": [],
+            "trace": trace.to_dict(),
         }
 
         # 收集每个智能体的结果

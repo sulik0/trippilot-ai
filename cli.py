@@ -245,6 +245,7 @@ class TripPilotCLI:
 
         # 7. 显示调用的智能体与最终结果（原逻辑不变）
         self._display_agents_called(result_data)
+        self._display_trace_summary(result_data)
         self.console.print()
         self._display_results(result_data)
         self.memory_manager.add_message("assistant", json.dumps(result_data, ensure_ascii=False))
@@ -274,6 +275,37 @@ class TripPilotCLI:
         if agents_called:
             self.console.print()
             self.console.print(f"🤖 调用智能体: {', '.join(agents_called)}", style="dim")
+
+    def _display_trace_summary(self, result_data: dict):
+        """显示轻量运行轨迹摘要。"""
+        trace = result_data.get("trace") or {}
+        if not trace:
+            return
+
+        duration_ms = trace.get("duration_ms")
+        agent_events = trace.get("agents") or []
+        if duration_ms is None and not agent_events:
+            return
+
+        parts = []
+        if duration_ms is not None:
+            parts.append(f"总耗时 {duration_ms / 1000:.2f}s")
+
+        agent_parts = []
+        for event in agent_events:
+            display_name = self._get_agent_display_name(event.get("agent_name", ""))
+            status = event.get("status", "?")
+            duration = event.get("duration_ms")
+            if duration is None:
+                agent_parts.append(f"{display_name} {status}")
+            else:
+                agent_parts.append(f"{display_name} {duration / 1000:.2f}s")
+
+        if agent_parts:
+            parts.append(" / ".join(agent_parts))
+
+        if parts:
+            self.console.print(f"⏱️  执行轨迹: {' | '.join(parts)}", style="dim")
 
     def _display_results(self, result_data: dict):
         """显示执行结果 - 确保永远有回复"""
