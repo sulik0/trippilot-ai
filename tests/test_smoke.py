@@ -2,6 +2,8 @@ import asyncio
 import json
 
 from agents.lazy_agent_registry import LazyAgentRegistry
+from agents.orchestration_agent import OrchestrationAgent
+from agents.protocol import PROTOCOL_VERSION
 from agentscope.message import Msg
 from context.memory_manager import MemoryManager
 
@@ -59,3 +61,74 @@ def test_lazy_registry_loads_event_collection():
     data = asyncio.run(run())
     assert data["origin"] == "北京"
     assert data["destination"] == "上海"
+
+
+def test_orchestrator_uses_protocol_envelope():
+    captured = {}
+
+    class CaptureAgent:
+        async def reply(self, msg):
+            captured["payload"] = json.loads(msg.content)
+            return Msg(
+                name="capture",
+                content=json.dumps({"answer": "ok"}, ensure_ascii=False),
+                role="assistant",
+            )
+
+    orchestrator = OrchestrationAgent(
+        agent_registry={"memory_query": CaptureAgent()},
+        memory_manager=None,
+    )
+    intention = {
+        "run_id": "run_test_001",
+        "intents": [{"type": "memory_query"}],
+        "key_entities": {},
+        "rewritten_query": "查询我的偏好",
+        "agent_schedule": [{
+            "agent_name": "memory_query",
+            "priority": 1,
+            "reason": "验证协议",
+            "expected_output": "返回答案",
+        }],
+    }
+
+    async def run():
+        msg = Msg(
+            name="IntentionAgent",
+            content=json.dumps(intention, ensure_ascii=False),
+            role="assistant",
+        )
+        result = await orchestrator.reply(msg)
+        return json.loads(result.content)
+
+    data = asyncio.run(run())
+
+    assert data["protocol_version"] == PROTOCOL_VERSION
+    assert data["run_id"] == "run_test_001"
+    assert data["results"][0]["status"] == "success"
+    assert data["results"][0]["task_id"].startswith("task_memory_query_")
+    assert captured["payload"]["protocol_version"] == PROTOCOL_VERSION
+    assert captured["payload"]["run_id"] == "run_test_001"
+    assert captured["payload"]["reason"] == "验证协议"
+    assert captured["payload"]["context"]["rewritten_query"] == "查询我的偏好"
+
+
+def test_orchestrator_rejects_invalid_schedule():
+    orchestrator = OrchestrationAgent(agent_registry={}, memory_manager=None)
+
+    async def run():
+        msg = Msg(
+            name="IntentionAgent",
+            content=json.dumps({
+                "agent_schedule": [{"priority": 1}],
+            }),
+            role="assistant",
+        )
+        result = await orchestrator.reply(msg)
+        return json.loads(result.content)
+
+    data = asyncio.run(run())
+
+    assert data["status"] == "error"
+    assert data["protocol_version"] == PROTOCOL_VERSION
+    assert data["error"]["code"] == "INVALID_AGENT_SCHEDULE"

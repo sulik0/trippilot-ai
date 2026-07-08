@@ -7,11 +7,11 @@
 2. 按照优先级顺序执行子智能体
 3. 管理智能体之间的消息传递
 4. 聚合多个智能体的结果
-5. 与三层记忆系统集成
+5. 与两层记忆系统集成
 
 执行模式：
 - Sequential (顺序执行): 按优先级依次执行，前一个的输出作为后一个的输入
-- Parallel (并行执行): 同时执行多个智能体（暂不实现）
+- Parallel (并行执行): 同优先级智能体使用 asyncio.gather 并行执行
 """
 from agentscope.agent import AgentBase
 from agentscope.message import Msg
@@ -19,6 +19,16 @@ from typing import Optional, Union, List, Dict, Any
 import json
 import logging
 import asyncio
+
+from agents.protocol import (
+    AgentError,
+    AgentExecutionResult,
+    AgentMessageEnvelope,
+    AgentTask,
+    PROTOCOL_VERSION,
+    new_run_id,
+    normalize_agent_output,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -91,25 +101,50 @@ class OrchestrationAgent(AgentBase):
                 role="assistant"
             )
 
-        # 获取智能体调度计划
-        agent_schedule = intention_data.get("agent_schedule", [])
-        if not agent_schedule:
+        run_id = intention_data.get("run_id") or new_run_id()
+
+        # 获取并验证智能体调度计划
+        raw_schedule = intention_data.get("agent_schedule", [])
+        if not raw_schedule:
             return Msg(
                 name=self.name,
                 content=json.dumps({
                     "status": "no_agents",
+                    "run_id": run_id,
+                    "protocol_version": PROTOCOL_VERSION,
                     "message": "没有需要调度的智能体"
                 }),
                 role="assistant"
             )
 
+        try:
+            agent_schedule = [AgentTask.from_schedule_item(item) for item in raw_schedule]
+        except (TypeError, ValueError) as e:
+            logger.error(f"Invalid agent schedule: {e}")
+            error = AgentError(
+                code="INVALID_AGENT_SCHEDULE",
+                message=str(e),
+                retryable=False,
+                user_message="调度计划格式有误，请重新描述需求。",
+            )
+            return Msg(
+                name=self.name,
+                content=json.dumps({
+                    "status": "error",
+                    "run_id": run_id,
+                    "protocol_version": PROTOCOL_VERSION,
+                    "error": error.to_dict(),
+                }, ensure_ascii=False),
+                role="assistant"
+            )
+
         # 按优先级排序
-        sorted_schedule = sorted(agent_schedule, key=lambda x: x.get("priority", 999))
+        sorted_schedule = sorted(agent_schedule, key=lambda x: x.priority)
 
         logger.info(f"Orchestrating {len(sorted_schedule)} agents")
 
         # 准备上下文信息
-        context = self._prepare_context(intention_data)
+        context = self._prepare_context(intention_data, run_id)
 
         # 并行执行智能体（按优先级分组）
         results = []
@@ -117,13 +152,13 @@ class OrchestrationAgent(AgentBase):
         parallel_tasks = []
 
         for task in sorted_schedule:
-            priority = task.get("priority", 0)
+            priority = task.priority
 
             # 如果优先级变化，先执行当前批次
             if current_priority is not None and priority != current_priority:
                 # 并行执行当前优先级的所有任务
                 if parallel_tasks:
-                    batch_results = await self._execute_parallel_agents(parallel_tasks, context, results)
+                    batch_results = await self._execute_parallel_agents(parallel_tasks, context, results, run_id)
                     results.extend(batch_results)
                     parallel_tasks = []
 
@@ -132,11 +167,11 @@ class OrchestrationAgent(AgentBase):
 
         # 执行最后一批
         if parallel_tasks:
-            batch_results = await self._execute_parallel_agents(parallel_tasks, context, results)
+            batch_results = await self._execute_parallel_agents(parallel_tasks, context, results, run_id)
             results.extend(batch_results)
 
         # 聚合结果
-        final_result = self._aggregate_results(results, intention_data)
+        final_result = self._aggregate_results(results, intention_data, run_id)
 
         # 更新记忆
         if self.memory_manager:
@@ -148,7 +183,7 @@ class OrchestrationAgent(AgentBase):
             role="assistant"
         )
 
-    def _prepare_context(self, intention_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _prepare_context(self, intention_data: Dict[str, Any], run_id: str) -> Dict[str, Any]:
         """
         准备上下文信息，供子智能体使用
 
@@ -159,6 +194,8 @@ class OrchestrationAgent(AgentBase):
             上下文字典
         """
         context = {
+            "protocol_version": PROTOCOL_VERSION,
+            "run_id": run_id,
             "reasoning": intention_data.get("reasoning", ""),
             "intents": intention_data.get("intents", []),
             "key_entities": intention_data.get("key_entities", {}),
@@ -179,9 +216,10 @@ class OrchestrationAgent(AgentBase):
 
     async def _execute_parallel_agents(
         self,
-        tasks: List[Dict],
+        tasks: List[AgentTask],
         context: Dict[str, Any],
-        previous_results: List[Dict]
+        previous_results: List[Dict],
+        run_id: str
     ) -> List[Dict]:
         """
         并行执行多个智能体
@@ -201,15 +239,15 @@ class OrchestrationAgent(AgentBase):
         if len(tasks) == 1:
             task = tasks[0]
             result = await self._execute_agent(
-                agent_name=task.get("agent_name"),
+                task=task,
                 context=context,
-                reason=task.get("reason", ""),
-                expected_output=task.get("expected_output", ""),
-                previous_results=previous_results
+                previous_results=previous_results,
+                run_id=run_id
             )
             return [{
-                "agent_name": task.get("agent_name"),
-                "priority": task.get("priority", 0),
+                "agent_name": task.agent_name,
+                "priority": task.priority,
+                "task_id": task.task_id,
                 "result": result
             }]
 
@@ -219,39 +257,45 @@ class OrchestrationAgent(AgentBase):
         # 创建并行任务
         parallel_coroutines = []
         for task in tasks:
-            agent_name = task.get("agent_name")
-            priority = task.get("priority", 0)
-            reason = task.get("reason", "")
-            expected_output = task.get("expected_output", "")
+            agent_name = task.agent_name
+            priority = task.priority
 
             logger.info(f"Parallel executing agent: {agent_name} (priority={priority})")
 
             # 创建协程
             coroutine = self._execute_agent(
-                agent_name=agent_name,
+                task=task,
                 context=context,
-                reason=reason,
-                expected_output=expected_output,
-                previous_results=previous_results
+                previous_results=previous_results,
+                run_id=run_id
             )
-            parallel_coroutines.append((agent_name, priority, coroutine))
+            parallel_coroutines.append((task, coroutine))
 
         # 使用 asyncio.gather 并行执行
         execution_results = await asyncio.gather(
-            *[coro for _, _, coro in parallel_coroutines],
+            *[coro for _, coro in parallel_coroutines],
             return_exceptions=True
         )
 
         # 整理结果
         results = []
-        for (agent_name, priority, _), exec_result in zip(parallel_coroutines, execution_results):
+        for (task, _), exec_result in zip(parallel_coroutines, execution_results):
+            agent_name = task.agent_name
+            priority = task.priority
             if isinstance(exec_result, Exception):
                 logger.error(f"Parallel agent execution failed: {agent_name}, error: {exec_result}")
+                error = AgentError(
+                    code="PARALLEL_AGENT_EXECUTION_FAILED",
+                    message=str(exec_result),
+                    retryable=False,
+                    user_message="并行任务执行失败，请稍后重试。",
+                )
                 result = {
                     "status": "error",
                     "agent_name": agent_name,
                     "data": {"error": str(exec_result)},
-                    "message": f"并行执行失败: {str(exec_result)}"
+                    "message": f"并行执行失败: {str(exec_result)}",
+                    "error": error.to_dict(),
                 }
             else:
                 result = exec_result
@@ -259,6 +303,7 @@ class OrchestrationAgent(AgentBase):
             results.append({
                 "agent_name": agent_name,
                 "priority": priority,
+                "task_id": task.task_id,
                 "result": result
             })
 
@@ -266,44 +311,55 @@ class OrchestrationAgent(AgentBase):
 
     async def _execute_agent(
         self,
-        agent_name: str,
+        task: AgentTask,
         context: Dict[str, Any],
-        reason: str,
-        expected_output: str,
-        previous_results: List[Dict]
+        previous_results: List[Dict],
+        run_id: str
     ) -> Dict[str, Any]:
         """
         执行单个智能体
 
         Args:
-            agent_name: 智能体名称
+            task: 智能体调度任务
             context: 上下文信息
-            reason: 调用原因
-            expected_output: 期望输出
             previous_results: 前序智能体的结果
+            run_id: 当前端到端请求ID
 
         Returns:
             执行结果
         """
+        agent_name = task.agent_name
+
         # 检查智能体是否注册
         if agent_name not in self.agent_registry:
             logger.warning(f"Agent not registered: {agent_name}")
+            error = AgentError(
+                code="AGENT_NOT_REGISTERED",
+                message=f"Agent not registered: {agent_name}",
+                retryable=False,
+                user_message=f"智能体未注册: {agent_name}",
+            )
             return {
                 "status": "error",
+                "agent_name": agent_name,
+                "data": {},
+                "error": error.to_dict(),
                 "message": f"智能体未注册: {agent_name}"
             }
 
         agent = self.agent_registry[agent_name]
 
+        envelope = AgentMessageEnvelope(
+            run_id=run_id,
+            task=task,
+            context=context,
+            previous_results=previous_results,
+        )
+
         # 构建输入消息
         input_msg = Msg(
             name="Orchestrator",
-            content=json.dumps({
-                "context": context,
-                "reason": reason,
-                "expected_output": expected_output,
-                "previous_results": previous_results
-            }, ensure_ascii=False),
+            content=json.dumps(envelope.to_payload(), ensure_ascii=False),
             role="user"
         )
 
@@ -320,37 +376,30 @@ class OrchestrationAgent(AgentBase):
             else:
                 result = response.content
 
-            # 检查 result 中是否有 error 字段
-            # 如果有，说明智能体内部执行失败了
-            if isinstance(result, dict) and "error" in result:
-                error_msg = result.get("error", "未知错误")
-                return {
-                    "status": "error",
-                    "agent_name": agent_name,
-                    "data": result,
-                    "message": error_msg
-                }
-
-            return {
-                "status": "success",
-                "agent_name": agent_name,
-                "data": result
-            }
+            return normalize_agent_output(agent_name, result)
 
         except Exception as e:
             logger.error(f"Agent execution failed: {agent_name}, error: {e}")
+            error = AgentError(
+                code="AGENT_EXECUTION_FAILED",
+                message=str(e),
+                retryable=False,
+                user_message="智能体执行失败，请稍后重试。",
+            )
             # 返回友好的错误信息，但不中断流程
             return {
                 "status": "error",
                 "agent_name": agent_name,
                 "data": {"error": str(e)},
-                "message": f"智能体执行失败: {str(e)}"
+                "message": f"智能体执行失败: {str(e)}",
+                "error": error.to_dict(),
             }
 
     def _aggregate_results(
         self,
         results: List[Dict],
-        intention_data: Dict[str, Any]
+        intention_data: Dict[str, Any],
+        run_id: str
     ) -> Dict[str, Any]:
         """
         聚合多个智能体的结果
@@ -364,6 +413,8 @@ class OrchestrationAgent(AgentBase):
         """
         aggregated = {
             "status": "completed",
+            "protocol_version": PROTOCOL_VERSION,
+            "run_id": run_id,
             "intention": {
                 "intents": intention_data.get("intents", []),
                 "key_entities": intention_data.get("key_entities", {})
@@ -374,12 +425,15 @@ class OrchestrationAgent(AgentBase):
 
         # 收集每个智能体的结果
         for result in results:
-            aggregated["results"].append({
-                "agent_name": result["agent_name"],
-                "priority": result["priority"],
-                "status": result["result"].get("status", "unknown"),
-                "data": result["result"].get("data", {})
-            })
+            execution_result = AgentExecutionResult(
+                agent_name=result["agent_name"],
+                priority=result["priority"],
+                task_id=result.get("task_id", ""),
+                status=result["result"].get("status", "unknown"),
+                data=result["result"].get("data", {}),
+                error=AgentError(**result["result"]["error"]) if result["result"].get("error") else None,
+            )
+            aggregated["results"].append(execution_result.to_dict())
 
         # 检查是否有错误
         errors = [r for r in results if r["result"].get("status") == "error"]
