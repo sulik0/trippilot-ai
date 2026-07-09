@@ -76,7 +76,7 @@
 - 覆盖意图识别、事项抽取、偏好追加/覆盖、RAG query 分类。
 - 增加无需真实 LLM 的 mock-based contract tests。
 
-计划产物：
+产物：
 
 - `evals/`
 - `tests/test_agent_contracts.py`
@@ -85,6 +85,8 @@
 面试价值：
 
 - 能回答“你怎么证明效果好”。
+
+状态：已实施。
 
 ### Step 05：记忆层接口抽象
 
@@ -130,4 +132,4 @@
 ## 当前状态
 
 - GitHub 仓库：`https://github.com/sulik0/trippilot-ai`
-- 当前升级阶段：Step 03 Skill Manifest 与能力注册
+- 当前升级阶段：Step 04 评测集与 Agent 回归测试

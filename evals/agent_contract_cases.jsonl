@@ -1,0 +1,6 @@
+{"id":"intent_trip_with_preference","agent":"intention","input":"我下周一从上海去北京出差两天，喜欢住汉庭","expected":{"intents":["itinerary_planning","preference"],"schedule":["event_collection","preference","itinerary_planning"]}}
+{"id":"intent_policy_rag","agent":"intention","input":"北京出差住宿标准是多少？","expected":{"intents":["rag_knowledge"],"schedule":["rag_knowledge"]}}
+{"id":"event_collection_complete","agent":"event_collection","input":"7月20日从杭州去深圳出差三天","expected":{"origin":"杭州","destination":"深圳","duration_days":3}}
+{"id":"preference_append","agent":"preference","input":"我还喜欢如家酒店","expected":{"has_preferences":true,"preferences":[{"type":"hotel_brands","value":"如家","action":"append"}]}}
+{"id":"preference_replace","agent":"preference","input":"我搬家到上海浦东了","expected":{"has_preferences":true,"preferences":[{"type":"home_location","value":"上海浦东","action":"replace"}]}}
+{"id":"information_weather","agent":"information_query","input":"杭州明天天气怎么样？","expected":{"query_type":"天气查询"}}
