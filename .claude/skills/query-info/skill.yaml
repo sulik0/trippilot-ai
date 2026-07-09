@@ -1,0 +1,41 @@
+name: query-info
+display_name: Information Query
+description: Query weather and general web information for travel-related real-time needs.
+agent_name: information_query
+entrypoint: script/agent.py
+timeout_seconds: 45
+requires:
+  - llm
+  - network
+permissions:
+  - call_weather_service
+  - call_search_service
+triggers:
+  - 用户询问天气
+  - 用户要求搜索实时信息
+  - 用户查询非知识库中的外部信息
+input_schema:
+  type: object
+  required:
+    - context
+  properties:
+    context:
+      type: object
+output_schema:
+  type: object
+  required:
+    - query_type
+    - query_success
+    - results
+  properties:
+    query_type:
+      type: string
+    query_success:
+      type: boolean
+    results:
+      type: object
+sop:
+  - Classify the query as weather or web search.
+  - Call the matching external information source.
+  - Summarize results concisely.
+  - Return sources when web search results are available.

@@ -2,6 +2,8 @@ import os
 import yaml
 from typing import Dict, List, Optional
 
+from utils.skill_manifest import SkillManifestError, SkillManifestLoader
+
 class SkillLoader:
     """加载 .claude/skills 下的技能描述"""
     
@@ -11,19 +13,39 @@ class SkillLoader:
         project_root = os.path.dirname(os.path.dirname(current_file_path))
         self.skills_dir = os.path.join(project_root, skills_dir)
         self.skills: Dict[str, Dict] = {}
+        self.manifests: Dict[str, Dict] = {}
         
     def load_skills(self) -> Dict[str, Dict]:
         """
-        读取所有 SKILL.md 文件并解析 frontmatter
+        优先读取 skill.yaml；没有 manifest 时回退到 SKILL.md frontmatter。
         返回格式: { "skill-name": { "name": "...", "description": "..." } }
         """
         if not os.path.exists(self.skills_dir):
             print(f"Warning: Skills directory {self.skills_dir} not found.")
             return {}
+
+        try:
+            manifest_loader = SkillManifestLoader(self.skills_dir)
+            manifests = manifest_loader.discover()
+            self.manifests = {
+                name: manifest.to_dict()
+                for name, manifest in manifests.items()
+            }
+            for name, manifest in self.manifests.items():
+                self.skills[name] = {
+                    "name": name,
+                    "description": manifest.get("description", ""),
+                    "display_name": manifest.get("display_name", name),
+                    "agent_name": manifest.get("agent_name", name),
+                    "triggers": manifest.get("triggers", []),
+                    "sop": manifest.get("sop", []),
+                }
+        except SkillManifestError as e:
+            print(f"Warning: skill manifest invalid: {e}")
             
         for skill_name in os.listdir(self.skills_dir):
             skill_path = os.path.join(self.skills_dir, skill_name)
-            if os.path.isdir(skill_path):
+            if os.path.isdir(skill_path) and skill_name not in self.skills:
                 md_file = os.path.join(skill_path, "SKILL.md")
                 if os.path.exists(md_file):
                     skill_info = self._parse_skill_md(md_file)
@@ -130,4 +152,3 @@ class SkillLoader:
         except Exception as e:
             print(f"Error reading skill content {target_path}: {e}")
             return None
-

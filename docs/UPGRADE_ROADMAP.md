@@ -56,7 +56,7 @@
 - 声明名称、描述、输入输出、权限、超时。
 - LazyAgentRegistry 从 manifest 读取能力元数据。
 
-计划产物：
+产物：
 
 - `.claude/skills/*/skill.yaml`
 - Skill manifest loader
@@ -65,6 +65,8 @@
 面试价值：
 
 - 能讲插件化不是目录扫描，而是有元数据治理。
+
+状态：已实施。
 
 ### Step 04：评测集与 Agent 回归测试
 
@@ -128,4 +130,4 @@
 ## 当前状态
 
 - GitHub 仓库：`https://github.com/sulik0/trippilot-ai`
-- 当前升级阶段：Step 02 运行轨迹与轻量可观测性
+- 当前升级阶段：Step 03 Skill Manifest 与能力注册

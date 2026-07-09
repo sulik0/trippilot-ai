@@ -1,0 +1,41 @@
+name: memory-query
+display_name: Memory Query
+description: Query the user's saved travel history, preferences, and conversation summary from long-term memory.
+agent_name: memory_query
+entrypoint: script/agent.py
+timeout_seconds: 30
+requires:
+  - llm
+  - memory_manager
+permissions:
+  - read_long_term_memory
+triggers:
+  - 用户询问历史行程
+  - 用户询问已保存偏好
+  - 用户询问过去说过的信息
+input_schema:
+  type: object
+  required:
+    - context
+  properties:
+    context:
+      type: object
+      required:
+        - rewritten_query
+output_schema:
+  type: object
+  required:
+    - status
+    - answer
+  properties:
+    status:
+      type: string
+    answer:
+      type: string
+    memory_sources:
+      type: object
+sop:
+  - Read rewritten_query from the task context.
+  - Load the user's long-term memory through MemoryManager.
+  - Answer only from stored preferences, trip history, and summaries.
+  - Return a structured result with source counters.

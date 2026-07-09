@@ -1,0 +1,40 @@
+name: plan-trip
+display_name: Itinerary Planning
+description: Generate a business travel itinerary using collected event facts and user preferences.
+agent_name: itinerary_planning
+entrypoint: script/agent.py
+timeout_seconds: 60
+requires:
+  - llm
+  - event_collection_result
+permissions:
+  - read_user_preferences
+triggers:
+  - 用户要求规划行程
+  - 用户提供目的地和日期并希望安排行程
+  - event-collection 已完成且需要生成计划
+input_schema:
+  type: object
+  required:
+    - context
+    - previous_results
+  properties:
+    context:
+      type: object
+    previous_results:
+      type: array
+output_schema:
+  type: object
+  required:
+    - planning_complete
+    - itinerary
+  properties:
+    planning_complete:
+      type: boolean
+    itinerary:
+      type: object
+sop:
+  - Read structured event facts from previous_results.
+  - Merge user preferences from context when available.
+  - Generate daily schedule, transport, hotel, and notes.
+  - Return planning_complete with a structured itinerary.

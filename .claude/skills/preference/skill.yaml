@@ -1,0 +1,38 @@
+name: preference
+display_name: Preference Management
+description: Extract and update user travel preferences such as hotel brands, airlines, home location, seats, meals, and budget.
+agent_name: preference
+entrypoint: script/agent.py
+timeout_seconds: 30
+requires:
+  - llm
+  - memory_manager
+permissions:
+  - read_long_term_memory
+  - write_long_term_memory
+triggers:
+  - 用户表达新的偏好
+  - 用户追加已有偏好
+  - 用户修改常住地或出行习惯
+input_schema:
+  type: object
+  required:
+    - context
+  properties:
+    context:
+      type: object
+output_schema:
+  type: object
+  required:
+    - preferences
+    - has_preferences
+  properties:
+    preferences:
+      type: array
+    has_preferences:
+      type: boolean
+sop:
+  - Detect preference statements from the request.
+  - Decide append or replace based on language cues.
+  - Normalize preference type and value.
+  - Return structured preference changes for persistence.

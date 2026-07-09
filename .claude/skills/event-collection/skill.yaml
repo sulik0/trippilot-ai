@@ -1,0 +1,40 @@
+name: event-collection
+display_name: Event Collection
+description: Extract structured travel facts such as origin, destination, dates, duration, return location, and trip purpose.
+agent_name: event_collection
+entrypoint: script/agent.py
+timeout_seconds: 30
+requires:
+  - llm
+permissions: []
+triggers:
+  - 用户提供出发地和目的地
+  - 用户提供差旅日期
+  - 行程规划前需要补齐结构化事项
+input_schema:
+  type: object
+  required:
+    - context
+  properties:
+    context:
+      type: object
+      required:
+        - rewritten_query
+output_schema:
+  type: object
+  required:
+    - origin
+    - destination
+    - missing_info
+  properties:
+    origin:
+      type: string
+    destination:
+      type: string
+    missing_info:
+      type: array
+sop:
+  - Read the rewritten travel request.
+  - Extract itinerary entities into stable fields.
+  - Mark missing required information explicitly.
+  - Return JSON for downstream planning.

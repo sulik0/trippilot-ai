@@ -1,0 +1,39 @@
+name: ask-question
+display_name: Travel Knowledge QA
+description: Answer business travel policy, reimbursement, booking, emergency, and city guide questions with local RAG knowledge.
+agent_name: rag_knowledge
+entrypoint: script/agent.py
+timeout_seconds: 60
+requires:
+  - llm
+  - rag_index
+permissions:
+  - read_knowledge_base
+triggers:
+  - 用户询问差旅标准
+  - 用户询问报销政策
+  - 用户询问预订流程或城市指南
+input_schema:
+  type: object
+  required:
+    - context
+  properties:
+    context:
+      type: object
+output_schema:
+  type: object
+  required:
+    - status
+    - answer
+  properties:
+    status:
+      type: string
+    answer:
+      type: string
+    retrieved_documents:
+      type: array
+sop:
+  - Extract the policy or travel knowledge question.
+  - Retrieve relevant documents from the local knowledge base.
+  - Generate an answer grounded in retrieved content.
+  - Return no_knowledge when retrieval does not support an answer.

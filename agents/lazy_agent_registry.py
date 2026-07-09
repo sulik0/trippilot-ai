@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 from rich.console import Console
 from agentscope.agent import AgentBase
+from utils.skill_manifest import SkillManifest, SkillManifestError, SkillManifestLoader
 
 class LazyAgentRegistry:
     """
@@ -39,6 +40,7 @@ class LazyAgentRegistry:
         
         # 技能映射表: skill_name -> agent_script_path
         self._skill_map: Dict[str, Path] = {}
+        self._manifest_map: Dict[str, SkillManifest] = {}
         
         # 发现技能
         self._discover_skills()
@@ -59,17 +61,22 @@ class LazyAgentRegistry:
             self.console.print(f"[yellow]Warning: Skills directory {self.skills_root} not found[/yellow]")
             return
 
-        count = 0
+        manifest_loader = SkillManifestLoader(self.skills_root)
+        try:
+            self._manifest_map = manifest_loader.discover()
+        except SkillManifestError as e:
+            self.console.print(f"[yellow]Warning: skill manifest invalid: {e}[/yellow]")
+            self._manifest_map = {}
+
         for skill_dir in self.skills_root.iterdir():
             if not skill_dir.is_dir():
                 continue
-            
-            # 查找 script/agent.py
-            agent_script = skill_dir / "script" / "agent.py"
+
+            skill_name = skill_dir.name
+            manifest = self._manifest_map.get(skill_name)
+            agent_script = manifest.entrypoint_path if manifest else skill_dir / "script" / "agent.py"
             if agent_script.exists():
-                skill_name = skill_dir.name
                 self._skill_map[skill_name] = agent_script
-                count += 1
                 
         # self.console.print(f"[dim]已发现 {count} 个技能插件[/dim]")
 
@@ -178,3 +185,27 @@ class LazyAgentRegistry:
         
     def get_loaded_agents(self) -> list:
         return list(self.cache.keys())
+
+    def get_skill_manifest(self, agent_name: str) -> Optional[Dict[str, Any]]:
+        """Return machine-readable metadata for a registered skill."""
+        skill_name = self._resolve_agent_name(agent_name)
+        if not skill_name:
+            return None
+
+        manifest = self._manifest_map.get(skill_name)
+        if manifest:
+            return manifest.to_dict()
+
+        return {
+            "name": skill_name,
+            "agent_name": agent_name,
+            "entrypoint": str(self._skill_map[skill_name]),
+            "description": "",
+        }
+
+    def get_skill_manifests(self) -> Dict[str, Dict[str, Any]]:
+        """Return all discovered skill metadata keyed by skill folder name."""
+        return {
+            skill_name: self.get_skill_manifest(skill_name) or {}
+            for skill_name in sorted(self._skill_map.keys())
+        }

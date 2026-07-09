@@ -6,6 +6,7 @@ from agents.orchestration_agent import OrchestrationAgent
 from agents.protocol import PROTOCOL_VERSION
 from agentscope.message import Msg
 from context.memory_manager import MemoryManager
+from utils.skill_manifest import SkillManifestLoader
 
 
 class FakeModel:
@@ -48,6 +49,10 @@ def test_lazy_registry_loads_event_collection():
     agent = registry["event_collection"]
 
     assert "event_collection" in registry.get_loaded_agents()
+    manifest = registry.get_skill_manifest("event_collection")
+    assert manifest["name"] == "event-collection"
+    assert manifest["agent_name"] == "event_collection"
+    assert manifest["entrypoint"] == "script/agent.py"
 
     async def run():
         msg = Msg(
@@ -61,6 +66,22 @@ def test_lazy_registry_loads_event_collection():
     data = asyncio.run(run())
     assert data["origin"] == "北京"
     assert data["destination"] == "上海"
+
+
+def test_skill_manifests_are_valid():
+    manifests = SkillManifestLoader(".claude/skills").discover()
+
+    assert set(manifests.keys()) == {
+        "ask-question",
+        "event-collection",
+        "memory-query",
+        "plan-trip",
+        "preference",
+        "query-info",
+    }
+    assert manifests["preference"].requires == ["llm", "memory_manager"]
+    assert manifests["query-info"].timeout_seconds == 45
+    assert manifests["plan-trip"].entrypoint_path.exists()
 
 
 def test_orchestrator_uses_protocol_envelope():
