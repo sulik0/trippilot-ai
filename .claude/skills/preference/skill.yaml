@@ -33,6 +33,7 @@ output_schema:
       type: boolean
 sop:
   - Detect preference statements from the request.
-  - Decide append or replace based on language cues.
-  - Normalize preference type and value.
-  - Return structured preference changes for persistence.
+  - Decide append, replace, update, delete, ignore based on language cues.
+  - Decide long_term or session_only scope from words like 以后, 通常, 这次, 本次.
+  - Normalize preference_type, preference_key, value, polarity, confidence, and reason.
+  - Return PreferenceUpdate-compatible structured changes for persistence.

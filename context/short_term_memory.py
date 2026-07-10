@@ -26,6 +26,7 @@ class ShortTermMemory:
         """
         self.max_turns = max_turns
         self.messages: List[Dict[str, Any]] = []
+        self.session_state: Dict[str, Any] = {}
 
     def add_message(self, role: str, content: str, metadata: Dict = None):
         """
@@ -94,13 +95,23 @@ class ShortTermMemory:
     def clear(self):
         """清空短期记忆"""
         self.messages = []
+        self.session_state = {}
         logger.info("Short-term memory cleared")
+
+    def set_state(self, key: str, value: Any):
+        """Set session-level state such as collected slots or temporary preferences."""
+        self.session_state[key] = value
+
+    def get_state(self, key: str, default: Any = None) -> Any:
+        """Get session-level state."""
+        return self.session_state.get(key, default)
 
     def get_statistics(self) -> Dict[str, Any]:
         """获取统计信息"""
         return {
             "total_messages": len(self.messages),
             "max_turns": self.max_turns,
+            "state_keys": sorted(self.session_state.keys()),
             "oldest_message_time": self.messages[0]["timestamp"] if self.messages else None,
             "newest_message_time": self.messages[-1]["timestamp"] if self.messages else None
         }

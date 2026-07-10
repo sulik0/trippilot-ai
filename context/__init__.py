@@ -11,6 +11,7 @@ from .stores import (
     NoopSemanticMemoryStore,
     NoopSummaryQueue,
 )
+from .preference_update import PreferenceUpdate
 
 __all__ = [
     'MemoryManager',
@@ -20,4 +21,5 @@ __all__ = [
     'JsonLongTermStore',
     'NoopSemanticMemoryStore',
     'NoopSummaryQueue',
+    'PreferenceUpdate',
 ]

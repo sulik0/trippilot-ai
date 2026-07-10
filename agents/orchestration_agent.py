@@ -20,6 +20,7 @@ import json
 import logging
 import asyncio
 
+from context.preference_update import apply_preference_update, normalize_preference_updates
 from agents.protocol import (
     AgentError,
     AgentExecutionResult,
@@ -490,49 +491,7 @@ class OrchestrationAgent(AgentBase):
 
             # 如果是偏好智能体，保存偏好信息到长期记忆
             if agent_name == "preference" and isinstance(data, dict):
-                preferences_data = data.get("preferences", {})
-
-                # 新格式：preferences 是列表，包含 {type, value, action}
-                if isinstance(preferences_data, list):
-                    for pref_item in preferences_data:
-                        if not isinstance(pref_item, dict):
-                            continue
-
-                        pref_type = pref_item.get("type")
-                        pref_value = pref_item.get("value")
-                        pref_action = pref_item.get("action", "replace")  # 默认覆盖
-
-                        if not pref_type or not pref_value:
-                            continue
-
-                        # 根据 action 决定操作
-                        if pref_action == "append":
-                            # 追加模式：获取现有值并追加
-                            current_prefs = self.memory_manager.long_term.get_preference()
-                            existing_value = current_prefs.get(pref_type)
-
-                            # 如果现有值是列表，追加
-                            if isinstance(existing_value, list):
-                                if pref_value not in existing_value:
-                                    existing_value.append(pref_value)
-                                self.memory_manager.long_term.save_preference(pref_type, existing_value)
-                                logger.info(f"Appended to {pref_type}: {pref_value}, total: {existing_value}")
-                            else:
-                                # 如果现有值不是列表，创建新列表
-                                new_list = [existing_value, pref_value] if existing_value else [pref_value]
-                                self.memory_manager.long_term.save_preference(pref_type, new_list)
-                                logger.info(f"Created list for {pref_type}: {new_list}")
-                        else:
-                            # 覆盖模式：直接保存新值
-                            self.memory_manager.long_term.save_preference(pref_type, pref_value)
-                            logger.info(f"Replaced {pref_type}: {pref_value}")
-
-                # 旧格式兼容：preferences 是字典
-                elif isinstance(preferences_data, dict):
-                    for pref_type, value in preferences_data.items():
-                        if value and pref_type != "has_preferences" and pref_type != "error":
-                            self.memory_manager.long_term.save_preference(pref_type, value)
-                            logger.info(f"Updated {pref_type}: {value} (legacy format)")
+                self._apply_preference_updates(data.get("preferences", {}))
 
             # 如果是行程规划智能体，保存行程到长期记忆
             if agent_name == "itinerary_planning" and isinstance(data, dict):
@@ -566,3 +525,44 @@ class OrchestrationAgent(AgentBase):
                         logger.info(f"Saved trip to long-term memory: {origin} -> {destination}")
 
         logger.info("Memory updated after orchestration")
+
+    def _apply_preference_updates(self, preferences_data: Any):
+        """Apply PreferenceUpdate protocol while keeping legacy outputs valid."""
+        updates = normalize_preference_updates(preferences_data)
+        if not updates:
+            return
+
+        current_prefs = self.memory_manager.long_term.get_preference()
+        for update in updates:
+            if update.scope == "session_only" or update.action == "ignore":
+                overrides = self.memory_manager.short_term.get_state("preference_overrides", [])
+                overrides.append(update.to_dict())
+                self.memory_manager.short_term.set_state("preference_overrides", overrides)
+                logger.info("Skipped long-term preference write: %s", update.to_dict())
+                continue
+
+            new_value = apply_preference_update(current_prefs, update)
+            if update.action == "delete":
+                excluded_type = f"excluded_{update.preference_type}"
+                current_excluded = current_prefs.get(excluded_type)
+                if isinstance(current_excluded, list):
+                    excluded_value = list(current_excluded)
+                elif current_excluded:
+                    excluded_value = [current_excluded]
+                else:
+                    excluded_value = []
+                if update.preference_key not in excluded_value:
+                    excluded_value.append(update.preference_key)
+                self.memory_manager.long_term.save_preference(excluded_type, excluded_value)
+                current_prefs[excluded_type] = excluded_value
+
+            if update.action == "delete" or new_value not in (None, [], {}):
+                self.memory_manager.long_term.save_preference(update.preference_type, new_value)
+                current_prefs[update.preference_type] = new_value
+            logger.info(
+                "Applied preference update: type=%s action=%s scope=%s value=%s",
+                update.preference_type,
+                update.action,
+                update.scope,
+                new_value,
+            )

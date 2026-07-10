@@ -68,8 +68,9 @@ data = asyncio.run(save_preference("我还喜欢如家"))
 
 ## 返回格式
 
-- `preferences`: 列表，每项 `{ "type", "value", "action": "append"|"replace" }`
+- `preferences`: 列表，每项为 PreferenceUpdate，推荐字段为 `{ "preference_type", "preference_key", "value", "action", "scope", "polarity", "confidence", "reason" }`
 - `has_preferences`: bool
+- 兼容旧格式 `{ "type", "value", "action" }`，但新输出应优先使用 PreferenceUpdate。
 
 
 ## 偏好提取规则
@@ -86,7 +87,19 @@ data = asyncio.run(save_preference("我还喜欢如家"))
    - 示例："我搬家到上海了" → 覆盖 home_location
    - 示例："我现在喜欢靠窗座位" → 覆盖 seat_preference
 
-3. **首次设置**：用户第一次提及某个偏好
+3. **更新（update）**：用户想调整某类偏好的优先级或属性，不一定替换所有同类偏好
+   - 关键词：「以后优先」、「尽量」、「更偏好」
+   - 示例："以后优先高铁" → update transportation_preference
+
+4. **删除/负向偏好（delete）**：用户表达长期不要某个选项
+   - 关键词：「以后别」、「不要再」、「别推荐」
+   - 示例："以后别推荐如家" → delete hotel_brands，polarity=negative，scope=long_term
+
+5. **忽略/会话级约束（ignore）**：用户只对本次或当前会话生效
+   - 关键词：「这次」、「本次」、「今天」、「这趟」
+   - 示例："这次别住汉庭" → ignore hotel_brands，scope=session_only
+
+6. **首次设置**：用户第一次提及某个偏好
    - 如果当前偏好中没有这个字段，默认使用 replace
 
 【常见偏好类型】
@@ -104,23 +117,36 @@ data = asyncio.run(save_preference("我还喜欢如家"))
 {{
     "preferences": [
         {{
-            "type": "hotel_brands",
-            "value": "汉庭",
-            "action": "append"
+            "preference_type": "hotel_brands",
+            "preference_key": "如家",
+            "value": "如家",
+            "action": "append",
+            "scope": "long_term",
+            "polarity": "positive",
+            "confidence": 0.92,
+            "reason": "用户说“我还喜欢如家”，表示在已有酒店偏好上追加"
         }},
         {{
-            "type": "home_location",
+            "preference_type": "home_location",
+            "preference_key": "home_location",
             "value": "上海浦东新区",
-            "action": "replace"
+            "action": "replace",
+            "scope": "long_term",
+            "polarity": "positive",
+            "confidence": 0.95,
+            "reason": "用户说搬家到上海浦东新区，表示常住地覆盖"
         }}
     ],
     "has_preferences": true
 }}
 
 【重要规则】
-1. action 只能是 "append" 或 "replace"
-2. 根据用户的语气和上下文判断 action
-3. 如果用户使用「还」、「也」等词，使用 append
-4. 如果用户使用「搬家」、「改成」等词，使用 replace
-5. 如果是首次提及，使用 replace
-6. 如果用户未提及任何偏好，返回 {{"preferences": [], "has_preferences": false}}
+1. action 只能是 "append", "replace", "update", "delete", "ignore"
+2. scope 只能是 "long_term" 或 "session_only"
+3. polarity 只能是 "positive", "negative", "neutral"
+4. 如果用户使用「还」、「也」等词，通常使用 append
+5. 如果用户使用「搬家」、「改成」等词，通常使用 replace
+6. 如果用户使用「以后优先」，通常使用 update + long_term
+7. 如果用户使用「以后别」、「别推荐」，通常使用 delete + long_term + negative
+8. 如果用户使用「这次」、「本次」、「今天」，通常使用 ignore + session_only
+9. 如果用户未提及任何偏好，返回 {{"preferences": [], "has_preferences": false}}

@@ -770,12 +770,27 @@ LLM summary + MemoryPolicy
 
 ### Phase 2：PreferenceUpdate 协议
 
+状态：已实施。
+
 代码目标：
 
 - 定义 `PreferenceUpdate` 数据结构。
 - 支持 `append / replace / update / delete / ignore`。
 - 支持 `long_term / session_only`。
 - 更新 PreferenceAgent prompt 和 contract tests。
+
+已完成内容：
+
+- 新增 `context/preference_update.py`。
+- 定义 `PreferenceUpdate`，包含 `preference_type`、`preference_key`、`value`、`action`、`scope`、`polarity`、`confidence`、`reason`。
+- 新增 `normalize_preference_updates()`，兼容旧格式 `{type,value,action}` 和新格式 PreferenceUpdate。
+- 新增 `apply_preference_update()`，集中处理 append / replace / update / delete / ignore。
+- `OrchestrationAgent` 改为先归一化 PreferenceUpdate，再写入长期记忆。
+- `ignore + session_only` 不写长期记忆，而是写入短期 `preference_overrides`。
+- `delete + long_term` 会从正向偏好中移除，并写入 `excluded_<preference_type>` 负向偏好。
+- `ShortTermMemory` 新增 `session_state`，为后续 Redis session 状态 adapter 预留槽位。
+- 更新 preference skill 的 `SKILL.md` 和 `skill.yaml`，要求输出新协议字段。
+- 扩展 smoke tests，覆盖旧格式兼容、新协议写入、session_only 跳过、负向长期偏好。
 
 简历表述：
 

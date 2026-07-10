@@ -6,6 +6,7 @@ from agents.orchestration_agent import OrchestrationAgent
 from agents.protocol import PROTOCOL_VERSION
 from agentscope.message import Msg
 from context.memory_manager import MemoryManager
+from context.preference_update import PreferenceUpdate, normalize_preference_updates
 from context.stores import InMemoryShortTermStore, JsonLongTermStore, NoopSummaryQueue
 from utils.skill_manifest import SkillManifestLoader
 
@@ -73,6 +74,31 @@ def test_memory_manager_accepts_store_adapters(tmp_path):
     assert context["long_term"]["backend"] == "json_file"
     assert context["summary_queue"]["backend"] == "noop"
     assert summary_queue.events[0]["event_type"] == "memory.session.closed"
+
+
+def test_preference_update_normalizes_legacy_and_new_formats():
+    updates = normalize_preference_updates([
+        {"type": "hotel_brands", "value": "如家", "action": "append"},
+        {
+            "preference_type": "transportation_preference",
+            "preference_key": "高铁",
+            "value": {"mode": "高铁", "priority": "high"},
+            "action": "update",
+            "scope": "long_term",
+            "confidence": 0.88,
+        },
+    ])
+
+    assert updates[0] == PreferenceUpdate(
+        preference_type="hotel_brands",
+        preference_key="如家",
+        value="如家",
+        action="append",
+    )
+    assert updates[1].preference_type == "transportation_preference"
+    assert updates[1].preference_key == "高铁"
+    assert updates[1].action == "update"
+    assert updates[1].confidence == 0.88
 
 
 def test_lazy_registry_loads_event_collection():
@@ -236,3 +262,74 @@ def test_orchestrator_traces_parallel_batch():
     assert data["trace"]["batches"][0]["parallel"] is True
     assert set(data["trace"]["batches"][0]["agent_names"]) == {"memory_query", "preference"}
     assert agent_names == {"memory_query", "preference"}
+
+
+def test_orchestrator_applies_preference_update_protocol(tmp_path):
+    memory = MemoryManager("pref_user", "pref_session", storage_path=str(tmp_path))
+    memory.long_term.save_preference("hotel_brands", ["汉庭"])
+    orchestrator = OrchestrationAgent(agent_registry={}, memory_manager=memory)
+
+    orchestrator._update_memory({}, [{
+        "agent_name": "preference",
+        "result": {
+            "data": {
+                "preferences": [
+                    {
+                        "preference_type": "hotel_brands",
+                        "preference_key": "如家",
+                        "value": "如家",
+                        "action": "append",
+                        "scope": "long_term",
+                    },
+                    {
+                        "preference_type": "hotel_brands",
+                        "preference_key": "汉庭",
+                        "value": "汉庭",
+                        "action": "ignore",
+                        "scope": "session_only",
+                        "polarity": "negative",
+                    },
+                    {
+                        "preference_type": "transportation_preference",
+                        "preference_key": "高铁",
+                        "value": {"mode": "高铁", "priority": "high"},
+                        "action": "update",
+                        "scope": "long_term",
+                    },
+                ]
+            }
+        },
+    }])
+
+    assert memory.long_term.get_preference("hotel_brands") == ["汉庭", "如家"]
+    assert memory.short_term.get_state("preference_overrides")[0]["preference_key"] == "汉庭"
+    assert memory.long_term.get_preference("transportation_preference") == {
+        "mode": "高铁",
+        "priority": "high",
+    }
+
+
+def test_orchestrator_records_negative_long_term_preference(tmp_path):
+    memory = MemoryManager("negative_user", "negative_session", storage_path=str(tmp_path))
+    memory.long_term.save_preference("hotel_brands", ["汉庭"])
+    orchestrator = OrchestrationAgent(agent_registry={}, memory_manager=memory)
+
+    orchestrator._update_memory({}, [{
+        "agent_name": "preference",
+        "result": {
+            "data": {
+                "preferences": [{
+                    "preference_type": "hotel_brands",
+                    "preference_key": "如家",
+                    "value": "如家",
+                    "action": "delete",
+                    "scope": "long_term",
+                    "polarity": "negative",
+                    "reason": "用户说以后别推荐如家",
+                }]
+            }
+        },
+    }])
+
+    assert memory.long_term.get_preference("hotel_brands") == ["汉庭"]
+    assert memory.long_term.get_preference("excluded_hotel_brands") == ["如家"]

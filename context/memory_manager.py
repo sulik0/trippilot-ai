@@ -99,6 +99,7 @@ class MemoryManager:
             "short_term": {
                 "recent_dialogue": self.short_term.get_recent_context(5),
                 "context_string": self.short_term.get_context_string(5),
+                "session_state": getattr(self.short_term, "session_state", {}),
                 "statistics": self.short_term.get_statistics(),
                 "backend": getattr(self.short_term, "backend_name", "unknown"),
             },
