@@ -95,16 +95,22 @@
 - 将短期记忆和长期记忆抽象成接口。
 - 当前仍使用 in-memory + JSON 实现。
 - 预留 Redis / PostgreSQL adapter 接口，但不真正接入。
+- 明确生产目标架构：AgentScope Memory + Redis + PostgreSQL + Milvus + MQ。
+- 设计 PreferenceAgent 偏好更新协议，支持 append / replace / update / delete / ignore。
 
-计划产物：
+方案产物：
 
 - `context/stores.py`
 - `JsonLongTermStore`
 - `InMemoryShortTermStore`
+- `docs/UPGRADE_STEP_05_MEMORY_ARCHITECTURE.md`
 
 面试价值：
 
 - 能诚实说当前不是 Redis/PG，但架构上已经可替换。
+- 能讲清楚短期状态、结构化长期记忆、语义长期记忆和异步总结的边界。
+
+状态：方案已确定，代码待实施。
 
 ### Step 06：RAG 索引与检索治理文档化
 
@@ -132,4 +138,4 @@
 ## 当前状态
 
 - GitHub 仓库：`https://github.com/sulik0/trippilot-ai`
-- 当前升级阶段：Step 04 评测集与 Agent 回归测试
+- 当前升级阶段：Step 05 记忆模块改造方案
