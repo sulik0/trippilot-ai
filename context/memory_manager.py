@@ -3,10 +3,17 @@
 统一管理两层记忆，提供简单的API
 """
 from typing import Dict, Any, List, Optional
-from .short_term_memory import ShortTermMemory
-from .long_term_memory import LongTermMemory
+from .stores import (
+    InMemoryShortTermStore,
+    JsonLongTermStore,
+    LongTermStore,
+    NoopSemanticMemoryStore,
+    NoopSummaryQueue,
+    SemanticMemoryStore,
+    ShortTermStore,
+    SummaryQueue,
+)
 import logging
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +25,17 @@ class MemoryManager:
     - 长期记忆：用户偏好和历史（跨会话）
     """
 
-    def __init__(self, user_id: str, session_id: str, storage_path: str = "data/memory", llm_model=None):
+    def __init__(
+        self,
+        user_id: str,
+        session_id: str,
+        storage_path: str = "data/memory",
+        llm_model=None,
+        short_term_store: Optional[ShortTermStore] = None,
+        long_term_store: Optional[LongTermStore] = None,
+        semantic_store: Optional[SemanticMemoryStore] = None,
+        summary_queue: Optional[SummaryQueue] = None,
+    ):
         """
         初始化记忆管理器
 
@@ -27,16 +44,27 @@ class MemoryManager:
             session_id: 会话ID
             storage_path: 长期记忆存储路径
             llm_model: LLM模型实例（用于总结长期记忆）
+            short_term_store: 短期记忆 adapter，默认本地内存
+            long_term_store: 长期结构化记忆 adapter，默认 JSON 文件
+            semantic_store: 长期语义记忆 adapter，默认 noop
+            summary_queue: 异步总结队列 adapter，默认 noop
         """
         self.user_id = user_id
         self.session_id = session_id
         self.llm_model = llm_model
 
-        # 初始化两层记忆
-        self.short_term = ShortTermMemory(max_turns=10)
-        self.long_term = LongTermMemory(user_id, storage_path)
+        # 初始化记忆 adapter。默认仍使用本地实现，保持 CLI 和测试可直接运行。
+        self.short_term = short_term_store or InMemoryShortTermStore(max_turns=10)
+        self.long_term = long_term_store or JsonLongTermStore(user_id, storage_path)
+        self.semantic = semantic_store or NoopSemanticMemoryStore()
+        self.summary_queue = summary_queue or NoopSummaryQueue()
 
-        logger.info(f"Memory manager initialized for user {user_id}, session {session_id}")
+        logger.info(
+            "Memory manager initialized for user %s, session %s, stores=%s",
+            user_id,
+            session_id,
+            self.get_store_backends(),
+        )
 
     # ========== 短期记忆操作 ==========
 
@@ -71,15 +99,32 @@ class MemoryManager:
             "short_term": {
                 "recent_dialogue": self.short_term.get_recent_context(5),
                 "context_string": self.short_term.get_context_string(5),
-                "statistics": self.short_term.get_statistics()
+                "statistics": self.short_term.get_statistics(),
+                "backend": getattr(self.short_term, "backend_name", "unknown"),
             },
             "long_term": {
                 "preferences": self.long_term.get_preference(),
                 "chat_history": self.long_term.get_chat_history(10),
                 "trip_history": self.long_term.get_trip_history(5),
                 "frequent_destinations": self.long_term.get_frequent_destinations(3),
-                "statistics": self.long_term.get_statistics()
+                "statistics": self.long_term.get_statistics(),
+                "backend": getattr(self.long_term, "backend_name", "unknown"),
+            },
+            "semantic": {
+                "backend": getattr(self.semantic, "backend_name", "unknown"),
+            },
+            "summary_queue": {
+                "backend": getattr(self.summary_queue, "backend_name", "unknown"),
             }
+        }
+
+    def get_store_backends(self) -> Dict[str, str]:
+        """Return active memory backends for trace/debug output."""
+        return {
+            "short_term": getattr(self.short_term, "backend_name", "unknown"),
+            "long_term": getattr(self.long_term, "backend_name", "unknown"),
+            "semantic": getattr(self.semantic, "backend_name", "unknown"),
+            "summary_queue": getattr(self.summary_queue, "backend_name", "unknown"),
         }
 
     def get_context_for_agent(self, long_term_summary: str = None) -> str:

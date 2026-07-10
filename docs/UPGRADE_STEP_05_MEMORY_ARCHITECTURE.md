@@ -744,12 +744,25 @@ LLM summary + MemoryPolicy
 
 ### Phase 1：接口抽象
 
+状态：已实施。
+
 代码目标：
 
 - 新增 `context/stores.py`
 - 定义 `ShortTermStore`、`LongTermStore`、`SemanticMemoryStore`、`SummaryQueue`
 - 当前 JSON/list 实现作为 adapter
 - 保持测试全部通过
+
+已完成内容：
+
+- 新增 `context/stores.py`。
+- 新增 `InMemoryShortTermStore`，继承现有 `ShortTermMemory`。
+- 新增 `JsonLongTermStore`，继承现有 `LongTermMemory`。
+- 新增 `NoopSemanticMemoryStore`，作为 Milvus adapter 前的本地占位。
+- 新增 `NoopSummaryQueue`，作为 MQ adapter 前的本地占位。
+- `MemoryManager` 支持注入 `short_term_store`、`long_term_store`、`semantic_store`、`summary_queue`。
+- `MemoryManager.get_store_backends()` 可返回当前记忆 backend，用于调试和面试展示。
+- 默认行为仍然使用本地内存 + JSON 文件，保证 CLI 不需要 Redis/PG/Milvus/MQ 也能运行。
 
 简历表述：
 

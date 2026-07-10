@@ -6,6 +6,7 @@ from agents.orchestration_agent import OrchestrationAgent
 from agents.protocol import PROTOCOL_VERSION
 from agentscope.message import Msg
 from context.memory_manager import MemoryManager
+from context.stores import InMemoryShortTermStore, JsonLongTermStore, NoopSummaryQueue
 from utils.skill_manifest import SkillManifestLoader
 
 
@@ -42,6 +43,36 @@ def test_memory_roundtrip(tmp_path):
 
     assert reloaded.long_term.get_preference("hotel_brands") == ["汉庭"]
     assert reloaded.long_term.get_trip_history(1)[0]["destination"] == "上海"
+    assert reloaded.get_store_backends()["short_term"] == "in_memory"
+    assert reloaded.get_store_backends()["long_term"] == "json_file"
+
+
+def test_memory_manager_accepts_store_adapters(tmp_path):
+    short_term = InMemoryShortTermStore(max_turns=1)
+    long_term = JsonLongTermStore("adapter_user", str(tmp_path))
+    summary_queue = NoopSummaryQueue()
+    memory = MemoryManager(
+        "adapter_user",
+        "adapter_session",
+        short_term_store=short_term,
+        long_term_store=long_term,
+        summary_queue=summary_queue,
+    )
+
+    memory.add_message("user", "我喜欢住汉庭")
+    memory.add_message("assistant", "已记录")
+    memory.add_message("user", "我还喜欢如家")
+    memory.long_term.save_preference("hotel_brands", ["汉庭", "如家"])
+    memory.summary_queue.publish("memory.session.closed", {"session_id": "adapter_session"})
+
+    context = memory.get_full_context()
+
+    assert len(memory.short_term.get_recent_context()) == 2
+    assert memory.long_term.get_preference("hotel_brands") == ["汉庭", "如家"]
+    assert context["short_term"]["backend"] == "in_memory"
+    assert context["long_term"]["backend"] == "json_file"
+    assert context["summary_queue"]["backend"] == "noop"
+    assert summary_queue.events[0]["event_type"] == "memory.session.closed"
 
 
 def test_lazy_registry_loads_event_collection():
